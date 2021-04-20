@@ -113,7 +113,7 @@ class GmshMeshGenerator:
     '''
 
     def __init__(self, geometry, el_type=2, el_size_factor=1, dofs_per_node=1,
-                 gmsh_exec_path=None, clcurv=False,
+                 gmsh_exec_path='C:\\Users\Avell\PycharmProjects\calfem-python\gmsh\gmsh.exe', clcurv=False,
                  min_size=None, max_size=None, meshing_algorithm=None,
                  additional_options='', mesh_dir='', return_boundary_elements=False):
         '''        

@@ -3412,6 +3412,45 @@ def hooke(ptype,E,v):
         
     return D
 
+
+def ortho_hooke(ptype, E1,E2, v1,v2,G):
+    """
+    Calculate the material matrix for a linear
+    elastic and orthotropic material.
+
+    Parameters:
+
+        ptype=  1:  plane stress
+                2:  plane strain
+                3:  axisymmetry
+                4:  three dimensional
+
+        E1           Young's modulus in x- direction
+        E2           Young's modulus in y- direction
+        v1           Poissons const.
+        v2           Poissons const.
+        G            Shear modulus
+
+    Returns:
+
+        D           material matrix
+
+    """
+
+    if ptype == 1:
+        E1_ef = E1/(1 - v1*v2)
+        E2_ef = E2/(1 - v1*v2)
+        D = np.matrix(
+            [[E1_ef, E1_ef*v2, 0],
+             [E2_ef*v1, E2_ef, 0],
+             [0, 0, G]]
+        )
+        return D
+    else:
+        cfinfo("ptype not supported.")
+
+
+
 def effmises(es,ptype):
     """
     Calculate effective von mises stresses.
