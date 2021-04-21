@@ -16,128 +16,164 @@ import calfem.core as cfc
 import numpy as np
 import calfem.vis as cfv
 
-from math import sqrt
+from math import sqrt, ceil
 
 
+def get_el_on_curve(line, edge_lenght, points):
+    pt1 = points[line[0]]
+    pt2 = points[line[1]]
+    line_lenght = sqrt((pt2[0] - pt1[0]) ** 2 + (pt2[1] - pt1[1]) ** 2)
+    elements_on_curve = ceil(line_lenght / edge_lenght)
+    return elements_on_curve
 
-def in_plane_orthotropic_analysis(external_polygon, holes, support_edges, support_points, load_edges, load_points,
-                                  cross_section):
-    cfu.enableLogging()
 
-    # ---- Define problem variables ---------------------------------------------
+cfu.enableLogging()
 
-    layers = [1, 0, 1, 0, 1]
-    t = 0.3
-    v = 0.35
-    E = 2.1e9
-    G = 2.1e9 / 16
-    ptype = 1
-    ep = [ptype, t]
-    Dx = cfc.ortho_hooke(ptype, E, 0, 0, 0, G)
-    Dy = cfc.ortho_hooke(ptype, 0, E, 0, 0, G)
+# ---- Define problem variables ---------------------------------------------
 
-    # ---- Define geometry ------------------------------------------------------
+layers = [1, 0, 1]
+t = 0.02
+E = 12e9
+G = 0.45*690*1e6
+ptype = 1
+ep = [ptype, 1]
+Dx = cfc.ortho_hooke(ptype, E, 0, 0, 0, G)
+Dy = cfc.ortho_hooke(ptype, 0, E, 0, 0, G)
+D = np.zeros(shape=[3, 3])
+for layer in layers:
+    if layer == 1:
+        D += Dx * t
+    else:
+        D += Dy * t
 
-    cfu.info("Creating geometry...")
+# ---- Define geometry ------------------------------------------------------
 
-    g = cfg.geometry()
+cfu.info("Creating geometry...")
 
-    # Just a shorthand. We use this to make the circle arcs.
+g = cfg.geometry()
 
-    s2 = 1 / sqrt(2)
 
-    points = [[0, 0], [10, 0], [10, 3], [0, 3], [3, 1], [6, 1], [3, 2.5], [6, 2.5]]  # 20-24
+points = [[0, 0], [10, 0], [10, 3], [0, 3], [3, 1], [6, 1], [3, 2.5], [6, 2.5]]  # 20-24
 
-    for xp, yp in points:
-        g.point([xp * 0.1, yp * 0.1])
+for xp, yp in points:
+    g.point([xp * 0.1, yp * 0.1])
 
-    splines = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 7], [7, 6], [6, 4]]  # 25
+splines = [[0, 1], [1, 2], [2, 3], [3, 0], [4, 5], [5, 7], [7, 6], [6, 4]]  # 25
+top_lenght = 0
+for i, s in enumerate(splines):
+    if i == 6:
+        el_num = get_el_on_curve(s, 0.05, points)
+    elif i == 2:
+        el_num = get_el_on_curve(s, 0.1, points)
+        pt1 = points[s[0]]
+        pt2 = points[s[1]]
+        line_lenght = sqrt((pt2[0] - pt1[0]) ** 2 + (pt2[1] - pt1[1]) ** 2)
+        top_lenght = line_lenght/el_num
+    elif i == 5 or i == 7:
+        el_num = get_el_on_curve(s, 0.05, points)
+    else:
+        el_num = get_el_on_curve(s, 0.3, points)
+    g.spline(s, el_on_curve=el_num)
 
-    for s in splines:
-        g.spline(s, el_on_curve=10)
+g.curveMarker(ID=0, marker=5)
+g.curveMarker(ID=2, marker=7)
 
-    g.curveMarker(ID=0, marker=5)
-    g.curveMarker(ID=2, marker=7)
+# Points in circle arcs are [start, center, end]
 
-    # Points in circle arcs are [start, center, end]
+g.addSurface([0, 1, 2, 3], [[4, 5, 6, 7]])  # 0
 
-    g.addSurface([0, 1, 2, 3], [[4, 5, 6, 7]])  # 0
+# ---- Create mesh ----------------------------------------------------------
 
-    # ---- Create mesh ----------------------------------------------------------
+cfu.info("Meshing geometry...")
 
-    cfu.info("Meshing geometry...")
+# Create mesh
 
-    # Create mesh
+mesh = cfm.GmshMesh(geometry=g)
+mesh.el_type = 3
+mesh.dofs_per_node = 2
+mesh.maxsize = 0.1
 
-    mesh = cfm.GmshMesh(geometry=g)
-    mesh.el_type = 2
-    mesh.dofs_per_node = 2
-    mesh.maxsize = 0.1
+coords, edof, dofs, bdofs, elementmarkers = mesh.create()
 
-    coords, edof, dofs, bdofs, elementmarkers = mesh.create()
+# ---- Solve problem --------------------------------------------------------
 
-    # ---- Solve problem --------------------------------------------------------
+cfu.info("Assembling system matrix...")
 
-    cfu.info("Assembling system matrix...")
+nDofs = np.size(dofs)
+ex, ey = cfc.coordxtr(edof, coords, dofs)
+K = np.zeros([nDofs, nDofs])
 
-    nDofs = np.size(dofs)
-    ex, ey = cfc.coordxtr(edof, coords, dofs)
-    K = np.zeros([nDofs, nDofs])
+for eltopo, elx, ely in zip(edof, ex, ey):
+    if mesh.el_type == 2:
+        Ke = cfc.plante(elx, ely, ep, D)
+    else:
+        Ke = cfc.planqe(elx, ely, ep, D)
+    cfc.assem(eltopo, K, Ke)
 
-    for eltopo, elx, ely in zip(edof, ex, ey):
-        Ke = np.zeros(shape=[6, 6])
-        for layer in layers:
-            if layer == 1:
-                Ke += cfc.plante(elx, ely, ep, Dx)
-            else:
-                Ke += cfc.plante(elx, ely, ep, Dy)
-        cfc.assem(eltopo, K, Ke)
+cfu.info("Solving equation system...")
 
-    cfu.info("Solving equation system...")
+f = np.zeros([nDofs, 1])
 
-    f = np.zeros([nDofs, 1])
+bc = np.array([], 'i')
+bcVal = np.array([], 'f')
 
-    bc = np.array([], 'i')
-    bcVal = np.array([], 'f')
+bc, bcVal = cfu.applybc(bdofs, bc, bcVal, 5, 0.0, 0)
 
-    bc, bcVal = cfu.applybc(bdofs, bc, bcVal, 5, 0.0, 0)
+cfu.applyforce(bdofs, f, 7, -2000 * top_lenght, 2)
 
-    cfu.applyforce(bdofs, f, 7, -1e5, 2)
+a, r = cfc.solveq(K, f, bc, bcVal)
+displacement = str(np.max(np.abs(a)))
+cfu.info(displacement)
+cfu.info("Computing element forces...")
 
-    a, r = cfc.solveq(K, f, bc, bcVal)
+ed = cfc.extractEldisp(edof, a)
+nx = []
+ny = []
+txy = []
 
-    cfu.info("Computing element forces...")
+# For each element:
 
-    ed = cfc.extractEldisp(edof, a)
-    vonMises = []
+for i in range(edof.shape[0]):
+    # Determine element stresses and strains in the element.
 
-    # For each element:
+    if mesh.el_type == 2:
+        es, et = cfc.plants(ex[i, :], ey[i, :], ep, D, ed[i, :])
+        es=es[0]
+        et=et[0]
+    else:
+        es, et = cfc.planqs(ex[i, :], ey[i, :], ep, D, ed[i, :])
 
-    for i in range(edof.shape[0]):
-        # Determine element stresses and strains in the element.
+    # Calc and append effective stress to list.
+    nx.append(float(es[0]))
+    ny.append(float(es[1]))
+    txy.append(float(es[2]))
 
-        es, et = cfc.plants(ex[i, :], ey[i, :], ep, Dx, ed[i, :])
+    ## es: [sigx sigy tauxy]
 
-        # Calc and append effective stress to list.
+# ---- Visualise results ----------------------------------------------------
 
-        vonMises.append(es[0])
+cfu.info("Visualising...")
+cfu.info(str(np.max(np.abs(nx))))
+cfu.info(str(np.max(np.abs(ny))))
+cfu.info(str(np.max(np.abs(txy))))
+cfv.drawGeometry(g, draw_points=False, label_curves=True)
 
-        ## es: [sigx sigy tauxy]
+cfv.figure()
+cfv.draw_element_values(nx, coords, edof, mesh.dofs_per_node, mesh.el_type, a, draw_elements=True,
+                        draw_undisplaced_mesh=False)
 
-    # ---- Visualise results ----------------------------------------------------
+cfv.figure()
+cfv.draw_element_values(ny, coords, edof, mesh.dofs_per_node, mesh.el_type, a, draw_elements=True,
+                        draw_undisplaced_mesh=False)
 
-    cfu.info("Visualising...")
+cfv.figure()
+cfv.draw_element_values(txy, coords, edof, mesh.dofs_per_node, mesh.el_type, a, draw_elements=True,
+                        draw_undisplaced_mesh=False)
 
-    cfv.drawGeometry(g, draw_points=False, label_curves=True)
+cfv.figure()
+cfv.draw_displacements(a, coords, edof, mesh.dofs_per_node, mesh.el_type, draw_undisplaced_mesh=True,
+                       title="Example 06")
 
-    cfv.figure()
-    # cfv.draw_element_values(vonMises, coords, edof, mesh.dofs_per_node, mesh.el_type, a, draw_elements=True,
-    #                        draw_undisplaced_mesh=True)
+cfv.show_and_wait()
 
-    cfv.figure()
-    cfv.draw_displacements(a, coords, edof, mesh.dofs_per_node, mesh.el_type, draw_undisplaced_mesh=True,
-                           title="Example 06")
-
-    cfv.show_and_wait()
-
-    print("Done.")
+print("Done.")
