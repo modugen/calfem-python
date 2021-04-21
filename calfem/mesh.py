@@ -113,7 +113,7 @@ class GmshMeshGenerator:
     '''
 
     def __init__(self, geometry, el_type=2, el_size_factor=1, dofs_per_node=1,
-                 gmsh_exec_path='C:\\Users\Avell\PycharmProjects\calfem-python\gmsh\gmsh.exe', clcurv=False,
+                 gmsh_exec_path=None, clcurv=False,
                  min_size=None, max_size=None, meshing_algorithm=None,
                  additional_options='', mesh_dir='', return_boundary_elements=False):
         '''        
@@ -236,14 +236,11 @@ class GmshMeshGenerator:
                            31: 56, 92: 64, 93: 125}
         nodesPerElement = nodesPerElmDict[self.el_type]
 
-        # Check for GMSH executable [NOTE]Mostly copied from trimesh2d(). TODO: Test on different systems
         gmshExe = self.gmsh_exec_path
         if gmshExe == None:
-            gmshExe = ""
-            if sys.platform == "win32":
-                gmshExe = which("gmsh.exe")
-            else:
-                gmshExe = which("gmsh")
+            # Check for the gmsh executable
+            import shutil
+            gmshExe = shutil.which("gmsh")
         else:
             if not os.path.exists(gmshExe):
                 gmshExe = os.path.join(
